@@ -1,3 +1,4 @@
+# add sa ug libraries and tools para unya, with initialization 
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -14,11 +15,13 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, roc_curve, auc
 
+# stremlit title ra ni
 st.set_page_config(page_title="LazyBugs NIDS", page_icon="lazybugs.png", layout="wide")
 
+# define targets, automatic niya i detect ang target if naa same na column na sa sulod sa list 
 TARGETS = ["class", "label", "target", "attack", "intrusion"]
 
-
+# seeder or alternative data if walay csv na i import
 def synthetic_data(n=2500, seed=42):
     rng = np.random.default_rng(seed)
     protocol = rng.choice(["tcp", "udp", "icmp"], n, p=[.72, .18, .10])
@@ -43,6 +46,7 @@ def synthetic_data(n=2500, seed=42):
         "class": np.where(anomaly, "anomaly", "normal")
     })
 
+#
 def generate_single_random_packet(X_ref):
     """Generates random attributes cast safely as clean Python elements to keep UI states stable."""
     row = {}
@@ -65,6 +69,7 @@ def generate_single_random_packet(X_ref):
         row["flag"] = str(np.random.choice(X_ref["flag"].dropna().unique()))
     return row
 
+# suggest ug ways to protect from this kind of attack if naay ma detect ps. just a common ways not so technical
 def generate_playbook(row_df, anomaly_score):
     protocol = str(row_df["protocol_type"].iloc[0]).upper() if "protocol_type" in row_df.columns else "UNKNOWN"
     service = str(row_df["service"].iloc[0]).lower() if "service" in row_df.columns else "unknown"
@@ -74,6 +79,7 @@ def generate_playbook(row_df, anomaly_score):
     st.markdown("### Security Incident Response Playbook")
     st.info(f"**Calculated Threat Urgency Status:** {anomaly_score:.2%} Confidence Index")
     
+    # if ICMP kind na attack ang ma detect
     if protocol == "ICMP":
         st.error("**Vector Assessment: ICMP Flood / Subnet Scan Sweeping**")
         st.markdown("""
@@ -81,6 +87,8 @@ def generate_playbook(row_df, anomaly_score):
         * **2. Rate-Limiting Configuration:** Implement an active network threshold rule limiting ICMP traffic to a maximum of 5 packets/sec per node.
         * **3. Investigation Focus:** Audit host logs for mapping diagnostics or subnet sweeping signatures.
         """)
+    # if greater than 50k source bytes ang ma recieved ug more than 150 amount kay ma detect na DDoS
+    # ps. 50k recieved from 150 pockets is suspicious, and that amount of bytes in short time can crash device/services
     elif src_bytes > 50000 and count > 150:
         st.error("**Vector Assessment: Distributed Denial of Service (DDoS) / Infiltration**")
         st.markdown("""
@@ -88,6 +96,9 @@ def generate_playbook(row_df, anomaly_score):
         * **2. Connection Throttling:** Drop concurrent TCP handshakes targeting service components if the protocol flag remains un-established.
         * **3. Load Balancing:** Route ingress connections to alternate application node clusters to preserve uptime.
         """)
+    
+    # prevent niya ang suspicious reconnaissance
+    #ps. reconnaissance is the first step to exploitation, gina scan ang port para maka kita ug weakness
     elif service == "private":
         st.warning("**Vector Assessment: Unauthorized Port Scan / Private Subnet Enumeration**")
         st.markdown("""
@@ -95,6 +106,7 @@ def generate_playbook(row_df, anomaly_score):
         * **2. Security Audit:** Review IAM credentials and service ports mapping files to evaluate vulnerability exposure.
         * **3. Firewall Update:** Close unused default development ports on outer-facing proxy appliances.
         """)
+    
     else:
         st.error("**Vector Assessment: General Anomaly Matrix Disruption**")
         st.markdown("""
@@ -102,11 +114,12 @@ def generate_playbook(row_df, anomaly_score):
         * **2. Log Capture:** Dump system telemetry lines into a dedicated archive for deeper Wireshark capture evaluation.
         """)
 
+#identify target
 def target_column(df):
     lookup = {str(c).lower(): c for c in df.columns}
     return next((lookup[x] for x in TARGETS if x in lookup), None)
 
-
+#identify ang classes exp.(anomaly/normal)
 def encode_target(y):
     if y.dtype == object or str(y.dtype).startswith("string"):
         s = y.astype(str).str.strip().str.lower()
@@ -126,7 +139,7 @@ def encode_target(y):
         return y.astype(int)
     return y.map({vals[0]: 0, vals[1]: 1}).astype(int)
 
-
+#fetch selected type of classifier (randomforest/logisticregression/decisiontree)
 def classifier(name):
     if name == "Random Forest":
         return RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1)
@@ -134,8 +147,9 @@ def classifier(name):
         return LogisticRegression(max_iter=5000, random_state=42)
     return DecisionTreeClassifier(random_state=42)
 
-
+#start traning the machine and catches it, para if mag change ug classifier dili na mag strain balik
 @st.cache_resource(show_spinner="Training model...")
+#train ang data file gamit ang selected model
 def train(df, model_name):
     df = df.copy()
     target = target_column(df)
@@ -445,7 +459,6 @@ else:
 st.divider()
 st.header("Single Connection Inspection Matrix")
 
-# FIX: Added explicit execution containers to cleanly separate workflows
 ins1, ins2 = st.tabs(["Instant Random Simulation", "Manual Parameter Tweaking"])
 
 with ins1:
@@ -522,3 +535,107 @@ with ins2:
         if is_anomaly:
             st.divider()
             generate_playbook(row, anomaly_p)
+
+#unsupervise diri
+st.divider()
+st.header("Unsupervised Data Production Batch Inference")
+st.markdown("Upload completely unlabeled data (unsupervised CSV) here to calculate risks using your trained model pipeline and sensitivity thresholds.")
+
+
+def prepare_batch(raw, X_ref):
+    """Align an unlabeled dataframe to the training feature schema.
+    Returns (aligned_df, missing_cols, ignored_cols)."""
+    raw = raw.copy()
+    # drop target-like column if the file happens to contain one
+    tcol = target_column(raw)
+    if tcol is not None:
+        raw = raw.drop(columns=[tcol])
+    # case-insensitive / whitespace-tolerant column matching
+    ref_lookup = {str(c).strip().lower(): c for c in X_ref.columns}
+    raw.columns = [ref_lookup.get(str(c).strip().lower(), c) for c in raw.columns]
+    missing = [c for c in X_ref.columns if c not in raw.columns]
+    ignored = [c for c in raw.columns if c not in X_ref.columns]
+    aligned = raw.reindex(columns=X_ref.columns)
+    # coerce numeric columns; unseen/missing values are handled by the pipeline imputers
+    for c in X_ref.columns:
+        if pd.api.types.is_numeric_dtype(X_ref[c]):
+            aligned[c] = pd.to_numeric(aligned[c], errors="coerce")
+        else:
+            aligned[c] = aligned[c].astype("object").where(aligned[c].notna(), np.nan)
+    return aligned, missing, ignored
+
+
+def predict_batch(pipe, batch):
+    """Return anomaly probability (class 0) for every row."""
+    clf_step = pipe.named_steps["classifier"]
+    if hasattr(clf_step, "predict_proba"):
+        probs = pipe.predict_proba(batch)
+        idx = list(clf_step.classes_).index(0)
+        return probs[:, idx]
+    return (pipe.predict(batch) == 0).astype(float)
+
+
+batch_upload = st.file_uploader("Upload unlabeled CSV for prediction", type="csv", key="batch_unlabeled_csv")
+
+if batch_upload is not None:
+    try:
+        raw_batch = pd.read_csv(batch_upload)
+    except Exception as e:
+        st.error(f"Could not read CSV: {e}")
+        raw_batch = None
+
+    if raw_batch is not None:
+        if raw_batch.empty:
+            st.warning("The uploaded file has no rows.")
+        else:
+            batch, missing, ignored = prepare_batch(raw_batch, r["X"])
+
+            if len(missing) == len(r["X"].columns):
+                st.error("None of the uploaded columns match the training features. "
+                         f"Expected columns: {', '.join(map(str, r['X'].columns))}")
+            else:
+                if missing:
+                    st.warning(f"Missing columns filled using training-set median/most-frequent values: {', '.join(map(str, missing))}")
+                if ignored:
+                    st.info(f"Ignored columns not used by the model: {', '.join(map(str, ignored))}")
+
+                scores = predict_batch(r["pipe"], batch)
+                result = raw_batch.copy()
+                result["Anomaly Probability"] = np.round(scores, 4)
+                result["Prediction"] = np.where(scores >= threshold, "ANOMALY", "NORMAL")
+
+                n_anom = int((scores >= threshold).sum())
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Rows Scored", f"{len(result):,}")
+                m2.metric("Threats Detected", f"{n_anom:,}")
+                m3.metric("Normal Traffic", f"{len(result) - n_anom:,}")
+                m4.metric("Threat Rate", f"{n_anom / len(result):.1%}")
+                st.caption(f"Model: {model_name} | Threshold: {threshold:.2f}")
+
+                view = st.radio("Show", ["All rows", "Anomalies only", "Normal only"], horizontal=True, key="batch_view")
+                shown = result
+                if view == "Anomalies only":
+                    shown = result[result["Prediction"] == "ANOMALY"]
+                elif view == "Normal only":
+                    shown = result[result["Prediction"] == "NORMAL"]
+                st.dataframe(shown.sort_values("Anomaly Probability", ascending=False),
+                             use_container_width=True, hide_index=True)
+
+                fig, ax = plt.subplots(figsize=(7, 3.5))
+                ax.hist(scores, bins=30, color="steelblue", edgecolor="white")
+                ax.axvline(threshold, color="red", linestyle="--", label=f"Threshold = {threshold:.2f}")
+                ax.set_xlabel("Anomaly Probability")
+                ax.set_ylabel("Rows")
+                ax.set_title("Anomaly Score Distribution (Uploaded Batch)")
+                ax.legend()
+                st.pyplot(fig)
+                plt.close(fig)
+
+                st.download_button(
+                    "Download Predictions (CSV)",
+                    data=result.to_csv(index=False).encode("utf-8"),
+                    file_name="nids_batch_predictions.csv",
+                    mime="text/csv",
+                )
+else:
+    st.info("Waiting for an unlabeled CSV. Train a model first (sidebar), then upload here.")
