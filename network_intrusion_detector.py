@@ -535,9 +535,9 @@ with ins2:
         if is_anomaly:
             st.divider()
             generate_playbook(row, anomaly_p)
-# ==========================================
-# UNSUPERVISED / UNLABELED BATCH INFERENCE
-# ==========================================
+
+# unsupervised ni diri
+
 st.divider()
 st.header("Unsupervised Data Production Batch Inference")
 st.markdown("Upload an unlabeled CSV to score its records using the trained model.")
@@ -628,101 +628,110 @@ if batch_upload is not None:
 
                 st.divider()
                 st.subheader("Batch Traffic Analytics")
-
-                # 1. Predicted normal traffic vs anomalies
-                st.markdown("#### 1. Traffic Classification Overview")
-                traffic_counts = result["Prediction"].value_counts().reindex(
-                    ["NORMAL", "ANOMALY"], fill_value=0
-                )
-                fig, ax = plt.subplots(figsize=(7, 4))
-                sns.barplot(x=traffic_counts.index, y=traffic_counts.values,
-                            hue=traffic_counts.index,
-                            palette="Set2", legend=False, ax=ax)
-                ax.set(xlabel="Predicted Class", ylabel="Records", title="Normal vs Anomalous Predictions")
-                for i, value in enumerate(traffic_counts.values):
-                    ax.text(i, value, f"{value:,}", ha="center", va="bottom")
-                st.pyplot(fig)
-                plt.close(fig)
-
-                # 2. Score distribution and chosen threshold
-                st.markdown("#### 2. Anomaly Probability Distribution")
-                fig, ax = plt.subplots(figsize=(9, 4))
-                sns.histplot(scores, bins=30, color="steelblue", edgecolor="white", ax=ax)
-                ax.axvline(threshold, color="red", linestyle="--", linewidth=2,
-                           label=f"Threshold = {threshold:.2f}")
-                ax.set(xlabel="Anomaly Probability", ylabel="Number of Records",
-                       title="Distribution of Predicted Anomaly Scores")
-                ax.legend()
-                st.pyplot(fig)
-                plt.close(fig)
-                st.caption("Scores are model estimates, not proof that a connection is malicious.")
-
-                # 3. Threat score bands (illustrative only)
-                st.markdown("#### 3. Threat Level Distribution")
-                risk_counts = result["Threat Level"].value_counts().reindex(
-                    ["Low Risk", "Medium Risk", "High Risk", "Critical Risk"], fill_value=0
-                )
-                nonzero = risk_counts[risk_counts > 0]
-                if not nonzero.empty:
-                    fig, ax = plt.subplots(figsize=(7, 5))
-                    ax.pie(nonzero.values, labels=nonzero.index, autopct="%1.1f%%",
-                           startangle=90, colors=sns.color_palette("Set2", n_colors=len(nonzero)))
-                    ax.set_title("Distribution by Model Score Band")
-                    ax.axis("equal")
+                
+                t1, t2, t3, t4, t5, t6, t7 = st.tabs([
+                    "Traffic Classification Overview", 
+                    "Anomaly Probability Distribution", 
+                    "Threat Level Distribution", 
+                    "Top 10 Most Suspicious Records", 
+                    "Anomaly Score by Record",
+                    "Source vs Destination Bytes",
+                ])
+                
+                with t1:
+                    # 1. Predicted normal traffic vs anomalies
+                    traffic_counts = result["Prediction"].value_counts().reindex(
+                        ["NORMAL", "ANOMALY"], fill_value=0
+                    )
+                    fig, ax = plt.subplots(figsize=(7, 4))
+                    sns.barplot(x=traffic_counts.index, y=traffic_counts.values,
+                                hue=traffic_counts.index,
+                                palette="Set2", legend=False, ax=ax)
+                    ax.set(xlabel="Predicted Class", ylabel="Records", title="Normal vs Anomalous Predictions")
+                    for i, value in enumerate(traffic_counts.values):
+                        ax.text(i, value, f"{value:,}", ha="center", va="bottom")
                     st.pyplot(fig)
                     plt.close(fig)
-
-                # 4. Ten records with the highest anomaly scores
-                st.markdown("#### 4. Top 10 Most Suspicious Records")
-                top_suspicious = result.nlargest(min(10, len(result)), "Anomaly Probability").copy()
-                top_suspicious["CSV Row"] = top_suspicious.index.astype(str)
-                fig, ax = plt.subplots(figsize=(9, 5))
-                sns.barplot(data=top_suspicious.sort_values("Anomaly Probability"),
-                            x="Anomaly Probability", y="CSV Row", palette="viridis",
-                            hue="Anomaly Probability", legend=False, ax=ax)
-                ax.axvline(threshold, color="black", linestyle="--", label="Detection threshold")
-                ax.set(xlabel="Anomaly Probability", ylabel="Original CSV Row Index",
-                       title="Highest-Scoring Records")
-                ax.legend()
-                st.pyplot(fig)
-                plt.close(fig)
-
-                # 5. Scores across records in file order
-                st.markdown("#### 5. Anomaly Score by Record")
-                fig, ax = plt.subplots(figsize=(10, 4))
-                sns.lineplot(x=np.arange(1, len(scores) + 1), y=scores, linewidth=1, ax=ax)
-                ax.axhline(threshold, color="red", linestyle="--", label=f"Threshold = {threshold:.2f}")
-                ax.set(xlabel="Record Number", ylabel="Anomaly Probability",
-                       title="Anomaly Scores Across Uploaded Records", ylim=(0, 1.05))
-                ax.legend()
-                st.pyplot(fig)
-                plt.close(fig)
-
-                # 6. Byte feature scatter plot when those columns are available
-                st.markdown("#### 6. Source vs Destination Bytes")
-                if "src_bytes" in batch.columns and "dst_bytes" in batch.columns:
-                    plot_df = batch[["src_bytes", "dst_bytes"]].copy()
-                    plot_df["Anomaly Probability"] = scores
-                    plot_df["Prediction"] = result["Prediction"].values
-                    for c in ["src_bytes", "dst_bytes"]:
-                        plot_df[c] = pd.to_numeric(plot_df[c], errors="coerce")
-                    plot_df = plot_df.dropna(subset=["src_bytes", "dst_bytes"])
-                    plot_df = plot_df[(plot_df["src_bytes"] > 0) & (plot_df["dst_bytes"] > 0)]
-                    if not plot_df.empty:
-                        fig, ax = plt.subplots(figsize=(9, 5))
-                        sns.scatterplot(data=plot_df, x="src_bytes", y="dst_bytes", hue="Prediction",
-                                        size="Anomaly Probability", sizes=(20, 160), alpha=0.65,
-                                        palette="coolwarm", ax=ax)
-                        ax.set_xscale("log")
-                        ax.set_yscale("log")
-                        ax.set(xlabel="Source Bytes (log scale)", ylabel="Destination Bytes (log scale)",
-                               title="Traffic Volume by Predicted Class")
+                    
+                with t2:
+                    # 2. Score distribution and chosen threshold
+                    fig, ax = plt.subplots(figsize=(9, 4))
+                    sns.histplot(scores, bins=30, color="steelblue", edgecolor="white", ax=ax)
+                    ax.axvline(threshold, color="red", linestyle="--", linewidth=2,
+                               label=f"Threshold = {threshold:.2f}")
+                    ax.set(xlabel="Anomaly Probability", ylabel="Number of Records",
+                           title="Distribution of Predicted Anomaly Scores")
+                    ax.legend()
+                    st.pyplot(fig)
+                    plt.close(fig)
+                    st.caption("Scores are model estimates, not proof that a connection is malicious.")
+                
+                with t3:
+                    # 3. Threat score bands (illustrative only)
+                    risk_counts = result["Threat Level"].value_counts().reindex(
+                        ["Low Risk", "Medium Risk", "High Risk", "Critical Risk"], fill_value=0
+                    )
+                    nonzero = risk_counts[risk_counts > 0]
+                    if not nonzero.empty:
+                        fig, ax = plt.subplots(figsize=(7, 5))
+                        ax.pie(nonzero.values, labels=nonzero.index, autopct="%1.1f%%",
+                               startangle=90, colors=sns.color_palette("Set2", n_colors=len(nonzero)))
+                        ax.set_title("Distribution by Model Score Band")
+                        ax.axis("equal")
                         st.pyplot(fig)
                         plt.close(fig)
+                
+                with t4:
+                    # 4. Ten records with the highest anomaly scores
+                    top_suspicious = result.nlargest(min(10, len(result)), "Anomaly Probability").copy()
+                    top_suspicious["CSV Row"] = top_suspicious.index.astype(str)
+                    fig, ax = plt.subplots(figsize=(9, 5))
+                    sns.barplot(data=top_suspicious.sort_values("Anomaly Probability"),
+                                x="Anomaly Probability", y="CSV Row", palette="viridis",
+                                hue="Anomaly Probability", legend=False, ax=ax)
+                    ax.axvline(threshold, color="black", linestyle="--", label="Detection threshold")
+                    ax.set(xlabel="Anomaly Probability", ylabel="Original CSV Row Index",
+                           title="Highest-Scoring Records")
+                    ax.legend()
+                    st.pyplot(fig)
+                    plt.close(fig)
+                    
+                with t5:
+                    # 5. Scores across records in file order
+                    fig, ax = plt.subplots(figsize=(10, 4))
+                    sns.lineplot(x=np.arange(1, len(scores) + 1), y=scores, linewidth=1, ax=ax)
+                    ax.axhline(threshold, color="red", linestyle="--", label=f"Threshold = {threshold:.2f}")
+                    ax.set(xlabel="Record Number", ylabel="Anomaly Probability",
+                           title="Anomaly Scores Across Uploaded Records", ylim=(0, 1.05))
+                    ax.legend()
+                    st.pyplot(fig)
+                    plt.close(fig)
+                    
+                with t6:
+                    # 6. Byte feature scatter plot when those columns are available
+                    if "src_bytes" in batch.columns and "dst_bytes" in batch.columns:
+                        plot_df = batch[["src_bytes", "dst_bytes"]].copy()
+                        plot_df["Anomaly Probability"] = scores
+                        plot_df["Prediction"] = result["Prediction"].values
+                        for c in ["src_bytes", "dst_bytes"]:
+                            plot_df[c] = pd.to_numeric(plot_df[c], errors="coerce")
+                        plot_df = plot_df.dropna(subset=["src_bytes", "dst_bytes"])
+                        plot_df = plot_df[(plot_df["src_bytes"] > 0) & (plot_df["dst_bytes"] > 0)]
+                        if not plot_df.empty:
+                            fig, ax = plt.subplots(figsize=(9, 5))
+                            sns.scatterplot(data=plot_df, x="src_bytes", y="dst_bytes", hue="Prediction",
+                                            size="Anomaly Probability", sizes=(20, 160), alpha=0.65,
+                                            palette="coolwarm", ax=ax)
+                            ax.set_xscale("log")
+                            ax.set_yscale("log")
+                            ax.set(xlabel="Source Bytes (log scale)", ylabel="Destination Bytes (log scale)",
+                                   title="Traffic Volume by Predicted Class")
+                            st.pyplot(fig)
+                            plt.close(fig)
+                        else:
+                            st.info("No positive source/destination byte values are available to plot.")
                     else:
-                        st.info("No positive source/destination byte values are available to plot.")
-                else:
-                    st.info("This dataset has no src_bytes/dst_bytes columns; scatter plot skipped.")
+                        st.info("This dataset has no src_bytes/dst_bytes columns; scatter plot skipped.")
 
                 st.download_button(
                     "Download Predictions (CSV)",
