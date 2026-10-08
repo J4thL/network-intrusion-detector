@@ -535,8 +535,9 @@ with ins2:
         if is_anomaly:
             st.divider()
             generate_playbook(row, anomaly_p)
-
-# usupervise ni diri
+# ==========================================
+# UNSUPERVISED / UNLABELED BATCH INFERENCE
+# ==========================================
 st.divider()
 st.header("Unsupervised Data Production Batch Inference")
 st.markdown("Upload an unlabeled CSV to score its records using the trained model.")
@@ -636,8 +637,7 @@ if batch_upload is not None:
                 fig, ax = plt.subplots(figsize=(7, 4))
                 sns.barplot(x=traffic_counts.index, y=traffic_counts.values,
                             hue=traffic_counts.index,
-                            palette={"NORMAL": "seagreen", "ANOMALY": "crimson"},
-                            legend=False, ax=ax)
+                            palette="Set2", legend=False, ax=ax)
                 ax.set(xlabel="Predicted Class", ylabel="Records", title="Normal vs Anomalous Predictions")
                 for i, value in enumerate(traffic_counts.values):
                     ax.text(i, value, f"{value:,}", ha="center", va="bottom")
@@ -647,7 +647,7 @@ if batch_upload is not None:
                 # 2. Score distribution and chosen threshold
                 st.markdown("#### 2. Anomaly Probability Distribution")
                 fig, ax = plt.subplots(figsize=(9, 4))
-                ax.hist(scores, bins=30, color="steelblue", edgecolor="white")
+                sns.histplot(scores, bins=30, color="steelblue", edgecolor="white", ax=ax)
                 ax.axvline(threshold, color="red", linestyle="--", linewidth=2,
                            label=f"Threshold = {threshold:.2f}")
                 ax.set(xlabel="Anomaly Probability", ylabel="Number of Records",
@@ -665,7 +665,8 @@ if batch_upload is not None:
                 nonzero = risk_counts[risk_counts > 0]
                 if not nonzero.empty:
                     fig, ax = plt.subplots(figsize=(7, 5))
-                    ax.pie(nonzero.values, labels=nonzero.index, autopct="%1.1f%%", startangle=90)
+                    ax.pie(nonzero.values, labels=nonzero.index, autopct="%1.1f%%",
+                           startangle=90, colors=sns.color_palette("Set2", n_colors=len(nonzero)))
                     ax.set_title("Distribution by Model Score Band")
                     ax.axis("equal")
                     st.pyplot(fig)
@@ -677,7 +678,8 @@ if batch_upload is not None:
                 top_suspicious["CSV Row"] = top_suspicious.index.astype(str)
                 fig, ax = plt.subplots(figsize=(9, 5))
                 sns.barplot(data=top_suspicious.sort_values("Anomaly Probability"),
-                            x="Anomaly Probability", y="CSV Row", color="indianred", ax=ax)
+                            x="Anomaly Probability", y="CSV Row", palette="viridis",
+                            hue="Anomaly Probability", legend=False, ax=ax)
                 ax.axvline(threshold, color="black", linestyle="--", label="Detection threshold")
                 ax.set(xlabel="Anomaly Probability", ylabel="Original CSV Row Index",
                        title="Highest-Scoring Records")
@@ -688,7 +690,7 @@ if batch_upload is not None:
                 # 5. Scores across records in file order
                 st.markdown("#### 5. Anomaly Score by Record")
                 fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(np.arange(1, len(scores) + 1), scores, linewidth=1, alpha=0.8)
+                sns.lineplot(x=np.arange(1, len(scores) + 1), y=scores, linewidth=1, ax=ax)
                 ax.axhline(threshold, color="red", linestyle="--", label=f"Threshold = {threshold:.2f}")
                 ax.set(xlabel="Record Number", ylabel="Anomaly Probability",
                        title="Anomaly Scores Across Uploaded Records", ylim=(0, 1.05))
@@ -710,7 +712,7 @@ if batch_upload is not None:
                         fig, ax = plt.subplots(figsize=(9, 5))
                         sns.scatterplot(data=plot_df, x="src_bytes", y="dst_bytes", hue="Prediction",
                                         size="Anomaly Probability", sizes=(20, 160), alpha=0.65,
-                                        palette={"NORMAL": "seagreen", "ANOMALY": "crimson"}, ax=ax)
+                                        palette="coolwarm", ax=ax)
                         ax.set_xscale("log")
                         ax.set_yscale("log")
                         ax.set(xlabel="Source Bytes (log scale)", ylabel="Destination Bytes (log scale)",
