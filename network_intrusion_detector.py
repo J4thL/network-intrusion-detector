@@ -536,27 +536,23 @@ with ins2:
             st.divider()
             generate_playbook(row, anomaly_p)
 
-#unsupervise diri
+# usupervise ni diri
 st.divider()
 st.header("Unsupervised Data Production Batch Inference")
-st.markdown("Upload completely unlabeled data (unsupervised CSV) here to calculate risks using your trained model pipeline and sensitivity thresholds.")
+st.markdown("Upload an unlabeled CSV to score its records using the trained model.")
 
 
 def prepare_batch(raw, X_ref):
-    """Align an unlabeled dataframe to the training feature schema.
-    Returns (aligned_df, missing_cols, ignored_cols)."""
+    """Align an unlabeled dataframe to the training feature schema."""
     raw = raw.copy()
-    # drop target-like column if the file happens to contain one
     tcol = target_column(raw)
     if tcol is not None:
         raw = raw.drop(columns=[tcol])
-    # case-insensitive / whitespace-tolerant column matching
     ref_lookup = {str(c).strip().lower(): c for c in X_ref.columns}
     raw.columns = [ref_lookup.get(str(c).strip().lower(), c) for c in raw.columns]
     missing = [c for c in X_ref.columns if c not in raw.columns]
     ignored = [c for c in raw.columns if c not in X_ref.columns]
     aligned = raw.reindex(columns=X_ref.columns)
-    # coerce numeric columns; unseen/missing values are handled by the pipeline imputers
     for c in X_ref.columns:
         if pd.api.types.is_numeric_dtype(X_ref[c]):
             aligned[c] = pd.to_numeric(aligned[c], errors="coerce")
@@ -566,16 +562,18 @@ def prepare_batch(raw, X_ref):
 
 
 def predict_batch(pipe, batch):
-    """Return anomaly probability (class 0) for every row."""
+    """Return the model's probability for class 0 (anomaly)."""
     clf_step = pipe.named_steps["classifier"]
     if hasattr(clf_step, "predict_proba"):
-        probs = pipe.predict_proba(batch)
-        idx = list(clf_step.classes_).index(0)
-        return probs[:, idx]
+        probabilities = pipe.predict_proba(batch)
+        class_index = list(clf_step.classes_).index(0)
+        return probabilities[:, class_index]
     return (pipe.predict(batch) == 0).astype(float)
 
 
-batch_upload = st.file_uploader("Upload unlabeled CSV for prediction", type="csv", key="batch_unlabeled_csv")
+batch_upload = st.file_uploader(
+    "Upload unlabeled CSV for prediction", type="csv", key="batch_unlabeled_csv"
+)
 
 if batch_upload is not None:
     try:
@@ -589,30 +587,36 @@ if batch_upload is not None:
             st.warning("The uploaded file has no rows.")
         else:
             batch, missing, ignored = prepare_batch(raw_batch, r["X"])
-
             if len(missing) == len(r["X"].columns):
-                st.error("None of the uploaded columns match the training features. "
-                         f"Expected columns: {', '.join(map(str, r['X'].columns))}")
+                st.error("No uploaded columns match the model's training features.")
             else:
                 if missing:
-                    st.warning(f"Missing columns filled using training-set median/most-frequent values: {', '.join(map(str, missing))}")
+                    st.warning("Missing features will be imputed: " + ", ".join(map(str, missing)))
                 if ignored:
-                    st.info(f"Ignored columns not used by the model: {', '.join(map(str, ignored))}")
+                    st.info("Unused columns: " + ", ".join(map(str, ignored)))
 
                 scores = predict_batch(r["pipe"], batch)
                 result = raw_batch.copy()
                 result["Anomaly Probability"] = np.round(scores, 4)
                 result["Prediction"] = np.where(scores >= threshold, "ANOMALY", "NORMAL")
+                result["Threat Level"] = pd.cut(
+                    scores, bins=[-0.001, 0.30, 0.60, 0.80, 1.001],
+                    labels=["Low Risk", "Medium Risk", "High Risk", "Critical Risk"],
+                    include_lowest=True
+                )
 
-                n_anom = int((scores >= threshold).sum())
+                anomaly_count = int((scores >= threshold).sum())
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Rows Scored", f"{len(result):,}")
-                m2.metric("Threats Detected", f"{n_anom:,}")
-                m3.metric("Normal Traffic", f"{len(result) - n_anom:,}")
-                m4.metric("Threat Rate", f"{n_anom / len(result):.1%}")
-                st.caption(f"Model: {model_name} | Threshold: {threshold:.2f}")
+                m2.metric("Anomalies Detected", f"{anomaly_count:,}")
+                m3.metric("Normal Predictions", f"{len(result) - anomaly_count:,}")
+                m4.metric("Predicted Threat Rate", f"{anomaly_count / len(result):.1%}")
+                st.caption(f"Model: {model_name} | Detection threshold: {threshold:.2f}")
 
-                view = st.radio("Show", ["All rows", "Anomalies only", "Normal only"], horizontal=True, key="batch_view")
+                view = st.radio(
+                    "Show records", ["All rows", "Anomalies only", "Normal only"],
+                    horizontal=True, key="batch_view"
+                )
                 shown = result
                 if view == "Anomalies only":
                     shown = result[result["Prediction"] == "ANOMALY"]
@@ -621,21 +625,108 @@ if batch_upload is not None:
                 st.dataframe(shown.sort_values("Anomaly Probability", ascending=False),
                              use_container_width=True, hide_index=True)
 
-                fig, ax = plt.subplots(figsize=(7, 3.5))
+                st.divider()
+                st.subheader("Batch Traffic Analytics")
+
+                # 1. Predicted normal traffic vs anomalies
+                st.markdown("#### 1. Traffic Classification Overview")
+                traffic_counts = result["Prediction"].value_counts().reindex(
+                    ["NORMAL", "ANOMALY"], fill_value=0
+                )
+                fig, ax = plt.subplots(figsize=(7, 4))
+                sns.barplot(x=traffic_counts.index, y=traffic_counts.values,
+                            hue=traffic_counts.index,
+                            palette={"NORMAL": "seagreen", "ANOMALY": "crimson"},
+                            legend=False, ax=ax)
+                ax.set(xlabel="Predicted Class", ylabel="Records", title="Normal vs Anomalous Predictions")
+                for i, value in enumerate(traffic_counts.values):
+                    ax.text(i, value, f"{value:,}", ha="center", va="bottom")
+                st.pyplot(fig)
+                plt.close(fig)
+
+                # 2. Score distribution and chosen threshold
+                st.markdown("#### 2. Anomaly Probability Distribution")
+                fig, ax = plt.subplots(figsize=(9, 4))
                 ax.hist(scores, bins=30, color="steelblue", edgecolor="white")
-                ax.axvline(threshold, color="red", linestyle="--", label=f"Threshold = {threshold:.2f}")
-                ax.set_xlabel("Anomaly Probability")
-                ax.set_ylabel("Rows")
-                ax.set_title("Anomaly Score Distribution (Uploaded Batch)")
+                ax.axvline(threshold, color="red", linestyle="--", linewidth=2,
+                           label=f"Threshold = {threshold:.2f}")
+                ax.set(xlabel="Anomaly Probability", ylabel="Number of Records",
+                       title="Distribution of Predicted Anomaly Scores")
                 ax.legend()
                 st.pyplot(fig)
                 plt.close(fig)
+                st.caption("Scores are model estimates, not proof that a connection is malicious.")
+
+                # 3. Threat score bands (illustrative only)
+                st.markdown("#### 3. Threat Level Distribution")
+                risk_counts = result["Threat Level"].value_counts().reindex(
+                    ["Low Risk", "Medium Risk", "High Risk", "Critical Risk"], fill_value=0
+                )
+                nonzero = risk_counts[risk_counts > 0]
+                if not nonzero.empty:
+                    fig, ax = plt.subplots(figsize=(7, 5))
+                    ax.pie(nonzero.values, labels=nonzero.index, autopct="%1.1f%%", startangle=90)
+                    ax.set_title("Distribution by Model Score Band")
+                    ax.axis("equal")
+                    st.pyplot(fig)
+                    plt.close(fig)
+
+                # 4. Ten records with the highest anomaly scores
+                st.markdown("#### 4. Top 10 Most Suspicious Records")
+                top_suspicious = result.nlargest(min(10, len(result)), "Anomaly Probability").copy()
+                top_suspicious["CSV Row"] = top_suspicious.index.astype(str)
+                fig, ax = plt.subplots(figsize=(9, 5))
+                sns.barplot(data=top_suspicious.sort_values("Anomaly Probability"),
+                            x="Anomaly Probability", y="CSV Row", color="indianred", ax=ax)
+                ax.axvline(threshold, color="black", linestyle="--", label="Detection threshold")
+                ax.set(xlabel="Anomaly Probability", ylabel="Original CSV Row Index",
+                       title="Highest-Scoring Records")
+                ax.legend()
+                st.pyplot(fig)
+                plt.close(fig)
+
+                # 5. Scores across records in file order
+                st.markdown("#### 5. Anomaly Score by Record")
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot(np.arange(1, len(scores) + 1), scores, linewidth=1, alpha=0.8)
+                ax.axhline(threshold, color="red", linestyle="--", label=f"Threshold = {threshold:.2f}")
+                ax.set(xlabel="Record Number", ylabel="Anomaly Probability",
+                       title="Anomaly Scores Across Uploaded Records", ylim=(0, 1.05))
+                ax.legend()
+                st.pyplot(fig)
+                plt.close(fig)
+
+                # 6. Byte feature scatter plot when those columns are available
+                st.markdown("#### 6. Source vs Destination Bytes")
+                if "src_bytes" in batch.columns and "dst_bytes" in batch.columns:
+                    plot_df = batch[["src_bytes", "dst_bytes"]].copy()
+                    plot_df["Anomaly Probability"] = scores
+                    plot_df["Prediction"] = result["Prediction"].values
+                    for c in ["src_bytes", "dst_bytes"]:
+                        plot_df[c] = pd.to_numeric(plot_df[c], errors="coerce")
+                    plot_df = plot_df.dropna(subset=["src_bytes", "dst_bytes"])
+                    plot_df = plot_df[(plot_df["src_bytes"] > 0) & (plot_df["dst_bytes"] > 0)]
+                    if not plot_df.empty:
+                        fig, ax = plt.subplots(figsize=(9, 5))
+                        sns.scatterplot(data=plot_df, x="src_bytes", y="dst_bytes", hue="Prediction",
+                                        size="Anomaly Probability", sizes=(20, 160), alpha=0.65,
+                                        palette={"NORMAL": "seagreen", "ANOMALY": "crimson"}, ax=ax)
+                        ax.set_xscale("log")
+                        ax.set_yscale("log")
+                        ax.set(xlabel="Source Bytes (log scale)", ylabel="Destination Bytes (log scale)",
+                               title="Traffic Volume by Predicted Class")
+                        st.pyplot(fig)
+                        plt.close(fig)
+                    else:
+                        st.info("No positive source/destination byte values are available to plot.")
+                else:
+                    st.info("This dataset has no src_bytes/dst_bytes columns; scatter plot skipped.")
 
                 st.download_button(
                     "Download Predictions (CSV)",
                     data=result.to_csv(index=False).encode("utf-8"),
                     file_name="nids_batch_predictions.csv",
-                    mime="text/csv",
+                    mime="text/csv"
                 )
 else:
-    st.info("Waiting for an unlabeled CSV. Train a model first (sidebar), then upload here.")
+    st.info("Upload an unlabeled CSV above to generate batch predictions and visualizations.")
