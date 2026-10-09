@@ -734,13 +734,54 @@ if batch_upload is not None:
                     else:
                         st.info("This dataset has no src_bytes/dst_bytes columns; scatter plot skipped.")
                 with t7:
-                    st.subheader("Confusion Matrix Breakdown")
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    sns.heatmap(r["cm"], annot=True, fmt="d", cmap="Blues", xticklabels=["Anomaly", "Normal"], yticklabels=["Anomaly", "Normal"], ax=ax)
-                    ax.set_xlabel("Predicted Label")
-                    ax.set_ylabel("Actual Label")
-                    st.pyplot(fig)
-                    plt.close(fig)
+                    st.subheader("Batch Evaluation Confusion Matrix")
+                    
+                    # Look for a ground truth target column in the uploaded batch file
+                    batch_target = target_column(raw_batch)
+                    
+                    if batch_target is not None:
+                        try:
+                            # 1. Safely extract and encode true classes from the batch file
+                            y_true_batch = encode_target(raw_batch[batch_target])
+                            
+                            # 2. Map predictions to match the label format (0: Anomaly, 1: Normal)
+                            y_pred_batch = np.where(result["Prediction"] == "ANOMALY", 0, 1)
+                            
+                            # 3. Calculate the confusion matrix matrix array
+                            batch_cm = confusion_matrix(y_true_batch, y_pred_batch, labels=[0, 1])
+                            
+                            # 4. Generate the heatmap visualization matching the training layout style
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            sns.heatmap(
+                                batch_cm, 
+                                annot=True, 
+                                fmt="d", 
+                                cmap="Blues", 
+                                xticklabels=["Anomaly", "Normal"], 
+                                yticklabels=["Anomaly", "Normal"], 
+                                ax=ax
+                            )
+                            ax.set_xlabel("Predicted Label")
+                            ax.set_ylabel("Actual Label")
+                            st.pyplot(fig)
+                            plt.close(fig)
+                            
+                            # 5. Add a supplementary detailed classification report underneath
+                            st.markdown("##### Batch Accuracy Performance Breakdown")
+                            batch_report = classification_report(
+                                y_true_batch, y_pred_batch, 
+                                labels=[0, 1], 
+                                target_names=["Anomaly", "Normal"], 
+                                output_dict=True, 
+                                zero_division=0
+                            )
+                            st.dataframe(pd.DataFrame(batch_report).T.round(3), use_container_width=True)
+                            
+                        except Exception as cm_error:
+                            st.error(f"Could not construct Confusion Matrix: {cm_error}")
+                    else:
+                        st.info("Truth Labels Missing: This file does not contain a target/class column. A confusion matrix cannot be calculated without known verification labels.")
+
 
                 st.download_button(
                     "Download Predictions (CSV)",
