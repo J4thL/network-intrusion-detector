@@ -629,7 +629,7 @@ if batch_upload is not None:
                 st.divider()
                 st.subheader("Batch Traffic Analytics")
                 
-                t1, t2, t3, t4, t5, t6, t7 = st.tabs([
+                t1, t2, t3, t4, t5, t6 = st.tabs([
                     "Traffic Classification Overview", 
                     "Anomaly Probability Distribution", 
                     "Threat Level Distribution", 
