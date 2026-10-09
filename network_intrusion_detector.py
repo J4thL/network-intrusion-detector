@@ -629,13 +629,14 @@ if batch_upload is not None:
                 st.divider()
                 st.subheader("Batch Traffic Analytics")
                 
-                t1, t2, t3, t4, t5, t6 = st.tabs([
+                t1, t2, t3, t4, t5, t6, t7 = st.tabs([
                     "Traffic Classification Overview", 
                     "Anomaly Probability Distribution", 
                     "Threat Level Distribution", 
                     "Top 10 Most Suspicious Records", 
                     "Anomaly Score by Record",
                     "Source vs Destination Bytes",
+                    "Confusion Matrix"
                 ])
                 
                 with t1:
@@ -732,6 +733,14 @@ if batch_upload is not None:
                             st.info("No positive source/destination byte values are available to plot.")
                     else:
                         st.info("This dataset has no src_bytes/dst_bytes columns; scatter plot skipped.")
+                with t7:
+                    st.subheader("Confusion Matrix Breakdown")
+                    fig, ax = plt.subplots(figsize=(6, 4))
+                    sns.heatmap(r["cm"], annot=True, fmt="d", cmap="Blues", xticklabels=["Anomaly", "Normal"], yticklabels=["Anomaly", "Normal"], ax=ax)
+                    ax.set_xlabel("Predicted Label")
+                    ax.set_ylabel("Actual Label")
+                    st.pyplot(fig)
+                    plt.close(fig)
 
                 st.download_button(
                     "Download Predictions (CSV)",
